@@ -8,11 +8,10 @@ import os
 import os.path
 from email.mime.text import MIMEText
 
-from google.auth.transport.requests import Request
-from google.oauth2 import service_account
-from google.oauth2.credentials import Credentials
-from google_auth_oauthlib.flow import InstalledAppFlow
-from googleapiclient.discovery import build
+from google.auth.transport.requests import Request  # type: ignore
+from google.oauth2.credentials import Credentials  # type: ignore
+from google_auth_oauthlib.flow import InstalledAppFlow  # type: ignore
+from googleapiclient.discovery import build  # type: ignore
 
 # If modifying these scopes, delete the file token.json.
 SCOPES = ["https://mail.google.com/"]
@@ -30,10 +29,6 @@ if not creds or not creds.valid:
     # Save the credentials for the next run
     with open("token.json", "w") as token:
         token.write(creds.to_json())
-
-# creds = service_account.Credentials.from_service_account_file(
-#    "gmag-391111-svc-account.json", scopes=SCOPES, subject="skelton.michael@gmail.com"
-# )
 
 
 service = build("gmail", "v1", credentials=creds)
