@@ -1,0 +1,1 @@
+# GMAG - GMail Content Aggregator
