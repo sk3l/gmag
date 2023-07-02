@@ -4,6 +4,7 @@
 from __future__ import print_function
 
 import base64
+import json
 import os
 import os.path
 from email.mime.text import MIMEText
@@ -59,15 +60,15 @@ def search_messages(svc, query):
 
 
 if __name__ == "__main__":
-    print("Searching messages in label:Home")
+    # print("Searching messages in label:Home")
     msgs = search_messages(service, "label:Home")
 
-    print(msgs)
+    # print(msgs)
     for msg in msgs:
         message = (
             service.users()
             .messages()
-            .get(id=msg["id"], userId="me", format="full")
+            .get(id=msg["id"], userId="me", format="metadata")
             .execute()
         )
-        print(message)
+        print(json.dumps(message))
