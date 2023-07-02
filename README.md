@@ -1,1 +1,1 @@
-# GMAG - GMail Content Aggregator
+# gmail-cli - GMail account manager
