@@ -4,7 +4,6 @@
 from __future__ import print_function
 
 # import base64
-import json
 import os
 import os.path
 
@@ -28,7 +27,9 @@ if not creds or not creds.valid:
     if creds and creds.expired and creds.refresh_token:
         creds.refresh(Request())
     else:
-        flow = InstalledAppFlow.from_client_secrets_file("gmag-auth-creds.json", SCOPES)
+        flow = InstalledAppFlow.from_client_secrets_file(
+            "gmail-cli-auth-creds.json", SCOPES
+        )
         creds = flow.run_local_server(bind_addr="0.0.0.0", port=8080)
     # Save the credentials for the next run
     with open("token.json", "w", encoding="UTF-8") as token:
@@ -36,6 +37,49 @@ if not creds or not creds.valid:
 
 
 google_api_client = build("gmail", "v1", credentials=creds)
+
+
+class Account:
+    """Encapsulate Google GMail account"""
+
+    def __init__(self, api_conn, user_id):
+        self.api_conn_ = api_conn
+        self.user_id_ = user_id
+        self.labels_ = {}
+
+    def user_id(self):
+        """GMail account user ID"""
+        return self.user_id_
+
+    def load_labels(self):
+        """Load all labels recursively for the account"""
+        labels = Label.get_all_labels(self)
+
+        # Get a hash of everyle label by their name.
+        # The final string in the label in the "/" delimted heirarchy path
+        label_map = {}
+        for label in labels:
+            label_map[label.name()] = label
+
+        # Recurse through the account label tree and add them to the account
+        for label in labels:
+            levels = label.path().split("/")
+            print(f"Loading label tree {levels}")
+
+            root_label = None
+            if levels[0] in self.labels_:
+                root_label = self.labels_[levels[0]]
+            else:
+                root_label = label_map[levels[0]]
+                self.labels_[levels[0]] = root_label
+
+            # print(f"Loading sublabel tree for top level label {levels[0]}")
+            next_label = root_label
+            for level in levels[1:]:
+                if level not in next_label.sublabels():
+                    new_label = label_map[level]
+                    next_label.sublabels()[level] = new_label
+                    next_label = new_label
 
 
 class Message:
@@ -53,6 +97,7 @@ class Message:
         self.load_message(self.content_type_)
 
     def load_message(self, content_type):
+        """Fetch details about message from GMail server"""
         self.content_ = (
             self.api_conn_.users()
             .messages()
@@ -61,9 +106,10 @@ class Message:
         )
 
     def delete(self):
-        pass
+        """Permanently delete the message"""
 
     def discard(self):
+        """Send the message to the trash folder"""
         return (
             self.api_conn_.users()
             .messages()
@@ -72,22 +118,47 @@ class Message:
         )
 
     def content(self):
+        """Show the content, body and metadata, of the message"""
         return self.content_
 
 
 class Label:
     """GMail email label"""
 
-    def __init__(self, api_conn, name):
-        self.api_conn_ = api_conn
-        self.name_ = name
+    def __init__(self, account, label_id, lazy_load=True):
+        self.account_ = account
+        self.label_id_ = label_id
+        self.content_ = (
+            self.account_.api_conn_.users()
+            .labels()
+            .get(userId="skelton.michael@gmail.com", id=label_id)
+            .execute()
+        )
+        self.path_ = self.content_["name"]
+        self.name_ = self.path_.split("/")[-1]
         self.messages_ = None
+        self.sublabels_ = {}
+
+        if not lazy_load:
+            self.load_messages()
+
+    @classmethod
+    def get_all_labels(cls, account):
+        """Retrieve a list of all labels under the GMail account"""
+        result = (
+            account.api_conn_.users().labels().list(userId=account.user_id()).execute()
+        )
+        label_list = []
+        for label in result["labels"]:
+            label_list.append(Label(account, label["id"]))
+        return label_list
 
     def load_messages(self):
+        """Load all messages *at top level only* for the message"""
         query = f"label:{self.name_}"
 
         result = (
-            self.api_conn_.users()
+            self.account_.api_conn_.users()
             .messages()
             .list(userId="skelton.michael@gmail.com", q=query)
             .execute()
@@ -96,12 +167,14 @@ class Label:
         if "messages" in result:
             for message in result.get("messages", None):
                 if message:
-                    self.messages_.append(Message(self.api_conn_, message.get("id", 0)))
+                    self.messages_.append(
+                        Message(self.account_.api_conn_, message.get("id", 0))
+                    )
 
         while "nextPageToken" in result:
             page_token = result["nextPageToken"]
             result = (
-                self.api_conn_.users()
+                self.account_.api_conn_.users()
                 .messages()
                 .list(userId="me", q=query, pageToken=page_token)
                 .execute()
@@ -110,10 +183,11 @@ class Label:
                 for message in result.get("messages", None):
                     if message:
                         self.messages_.append(
-                            Message(self.api_conn_, message.get("id", 0))
+                            Message(self.account_.api_conn_, message.get("id", 0))
                         )
 
     def discard_messages(self):
+        """Send all messages *at top level only* to the trash folder"""
         for message in self.messages():
             headers = message.content()["payload"]["headers"]
             subject = next(
@@ -125,13 +199,33 @@ class Label:
             print(f"Discarding message , subject={subject}, from={from_addr}")
             message.discard()
 
+    def label_id(self):
+        """Return Google internal ID for the label"""
+        return self.label_id_
+
+    def name(self):
+        """Return text name for the label"""
+        return self.name_
+
     def messages(self):
+        """Return list of messages under the label"""
         return self.messages_
+
+    def path(self):
+        """Return label's fully qualified path in the account label tree"""
+        return self.path_
+
+    def add_label(self, label):
+        """Add a new sublabel to the label"""
+        self.sublabels_[label.name()] = label
+
+    def sublabels(self):
+        """Return the set of sublabels under this label"""
+        return self.sublabels_
 
 
 if __name__ == "__main__":
-    # print("Searching messages in label:Home")
-    label = Label(google_api_client, "bills-retail")
-    label.load_messages()
-    print(json.dumps(label.messages()))
-    # label.discard_messages()
+    accnt = Account(google_api_client, "skelton.michael@gmail.com")
+    print("Loading account labels")
+    accnt.load_labels()
+    print("Completed loading account label tree")
