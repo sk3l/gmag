@@ -1,1 +1,1 @@
-# gmail-cli - GMail account manager
+# pygmail - Enhanced Python Wrapper for GMail API
