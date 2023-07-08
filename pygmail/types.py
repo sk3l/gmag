@@ -19,32 +19,45 @@ class Account:
     # If modifying these scopes, delete the file token.json.
     _SCOPES = ["https://mail.google.com/"]
 
-    def __init__(self, user_id):
+    def __init__(self, user_id, credential_path=os.path.curdir):
         self.api_conn_ = None
         self.user_id_ = user_id
         self.labels_ = {}
+        self.credentials_path_ = credential_path
         # Initialize our API connection
         self.auth_and_connect()
+
+        profile = self.api_conn_.users().getProfile(userId=self.user_id_).execute()
+
+        self.email_address_ = profile.get("emailAddress", None)
+        self.messages_count_ = profile.get("messagesTotal", None)
+        self.threads_conts_ = profile.get("threadsTotal", None)
+        self.history_id_ = profile.get("historyId", None)
 
     def auth_and_connect(self):
         """Execute Google OAuth flow to obtain API connection"""
         creds = None
 
-        if os.path.exists("token.json"):
-            creds = Credentials.from_authorized_user_file("token.json", Account._SCOPES)
+        token_file = os.path.join(self.credentials_path_, "token.json")
+        auth_creds_file = os.path.join(
+            self.credentials_path_, "gmail-cli-auth-creds.json"
+        )
+
+        if os.path.exists(token_file):
+            creds = Credentials.from_authorized_user_file(token_file, Account._SCOPES)
         # If there are no (valid) credentials available, let the user log in.
         if not creds or not creds.valid:
             if creds and creds.expired and creds.refresh_token:
                 creds.refresh(Request())
             else:
                 flow = InstalledAppFlow.from_client_secrets_file(
-                    "gmail-cli-auth-creds.json", Account._SCOPES
+                    auth_creds_file, Account._SCOPES
                 )
-            creds = flow.run_local_server(bind_addr="0.0.0.0", port=8080)
+                creds = flow.run_local_server(bind_addr="0.0.0.0", port=8080)
 
         # Save the credentials for the next run
         # TO DO - cache in memory
-        with open("token.json", "w", encoding="UTF-8") as token:
+        with open(token_file, "w", encoding="UTF-8") as token:
             token.write(creds.to_json())
 
         self.api_conn_ = build("gmail", "v1", credentials=creds)
@@ -52,6 +65,22 @@ class Account:
     def user_id(self):
         """GMail account user ID"""
         return self.user_id_
+
+    def email_address(self):
+        """Return account email address"""
+        return self.email_address_
+
+    def messages_count(self):
+        """Return account's total messsage count"""
+        return self.messages_count_
+
+    def threads_count(self):
+        """Return account's total threads count"""
+        return self.threads_conts_
+
+    def history_id(self):
+        """Return account's history ID"""
+        return self.history_id_
 
     def load_labels(self):
         """Load all labels recursively for the account"""
@@ -93,7 +122,7 @@ class Label:
         self.content_ = (
             self.account_.api_conn_.users()
             .labels()
-            .get(userId="skelton.michael@gmail.com", id=label_id)
+            .get(userId=self.account_.user_id(), id=label_id)
             .execute()
         )
         self.path_ = self.content_["name"]
@@ -122,7 +151,7 @@ class Label:
         result = (
             self.account_.api_conn_.users()
             .messages()
-            .list(userId="skelton.michael@gmail.com", q=query)
+            .list(userId=self.account_.user_id(), q=query)
             .execute()
         )
         self.messages_ = []
