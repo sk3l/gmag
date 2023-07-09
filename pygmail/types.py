@@ -3,7 +3,7 @@
 
 from __future__ import print_function
 
-# import base64
+# import base64h
 import os
 import os.path
 
@@ -16,14 +16,24 @@ from googleapiclient.discovery import build  # type: ignore
 class Account:
     """Encapsulate Google GMail account"""
 
+    class LabelTree:
+        """Represent heirarchical tree of Labels in Account, organized by name path"""
+
+        def __init__(self):
+            self.root_ = None
+            self.children_ = None
+
     # If modifying these scopes, delete the file token.json.
     _SCOPES = ["https://mail.google.com/"]
 
-    def __init__(self, user_id, credential_path=os.path.curdir):
+    def __init__(self, user_id, load_labels=False, creds_path=os.path.curdir):
         self.api_conn_ = None
         self.user_id_ = user_id
-        self.labels_ = {}
-        self.credentials_path_ = credential_path
+        self.labels_by_name_ = {}  # Map of all account Labels, keyed by name
+        self.labels_by_id_ = {}  # Map of all account Labels, keyed by ID
+        self.labels_ = []  # All Label objects in the account
+        self.creds_path_ = creds_path  # Location to look for OAuth tokens ets
+
         # Initialize our API connection
         self.auth_and_connect()
 
@@ -34,14 +44,15 @@ class Account:
         self.threads_conts_ = profile.get("threadsTotal", None)
         self.history_id_ = profile.get("historyId", None)
 
+        if load_labels:
+            self.load_labels()
+
     def auth_and_connect(self):
         """Execute Google OAuth flow to obtain API connection"""
         creds = None
 
-        token_file = os.path.join(self.credentials_path_, "token.json")
-        auth_creds_file = os.path.join(
-            self.credentials_path_, "gmail-cli-auth-creds.json"
-        )
+        token_file = os.path.join(self.creds_path_, "token.json")
+        auth_creds_file = os.path.join(self.creds_path_, "gmail-cli-auth-creds.json")
 
         if os.path.exists(token_file):
             creds = Credentials.from_authorized_user_file(token_file, Account._SCOPES)
@@ -54,13 +65,25 @@ class Account:
                     auth_creds_file, Account._SCOPES
                 )
                 creds = flow.run_local_server(bind_addr="0.0.0.0", port=8080)
-
         # Save the credentials for the next run
         # TO DO - cache in memory
         with open(token_file, "w", encoding="UTF-8") as token:
             token.write(creds.to_json())
 
         self.api_conn_ = build("gmail", "v1", credentials=creds)
+
+    def load_labels(self):
+        """Retrieve a the list of  all Labels under the GMail account"""
+        result = self.api_conn_.users().labels().list(userId=self.user_id()).execute()
+
+        for item in result["labels"]:
+            identifier = item["id"]
+            name = item["name"]
+            label = Label(self, identifier, name)
+
+            self.labels_.append(label)
+            self.labels_by_id_[identifier] = label
+            self.labels_by_name_[name] = label
 
     def user_id(self):
         """GMail account user ID"""
@@ -82,67 +105,40 @@ class Account:
         """Return account's history ID"""
         return self.history_id_
 
-    def load_labels(self):
+    def get_label_tree(self, root=None):
         """Load all labels recursively for the account"""
-        labels = Label.get_all_labels(self)
+        # Time consuming (can probably be parallelized
 
-        # Get a hash of everyle label by their name.
-        # The final string in the label in the "/" delimted heirarchy path
-        label_map = {}
-        for label in labels:
-            label_map[label.name()] = label
+    def get_all_labels(self):
+        """Return flattened list of all the Account's Label"""
+        return self.labels_
 
-        # Recurse through the account label tree and add them to the account
-        for label in labels:
-            levels = label.path().split("/")
-            print(f"Loading label tree {levels}")
+    def get_label_by_name(self, name):
+        """Return a Label by name lookup"""
+        return self.labels_by_name_.get(name, None)
 
-            root_label = None
-            if levels[0] in self.labels_:
-                root_label = self.labels_[levels[0]]
-            else:
-                root_label = label_map[levels[0]]
-                self.labels_[levels[0]] = root_label
-
-            # print(f"Loading sublabel tree for top level label {levels[0]}")
-            next_label = root_label
-            for level in levels[1:]:
-                if level not in next_label.sublabels():
-                    new_label = label_map[level]
-                    next_label.sublabels()[level] = new_label
-                    next_label = new_label
+    def get_label_by_id(self, label_id):
+        """Return a Label by id lookup"""
+        return self.labels_by_id_.get(label_id, None)
 
 
 class Label:
     """GMail email label"""
 
-    def __init__(self, account, label_id, lazy_load=True):
+    def __init__(self, account, label_id, name, lazy_load=True):
         self.account_ = account
         self.label_id_ = label_id
-        self.content_ = (
-            self.account_.api_conn_.users()
-            .labels()
-            .get(userId=self.account_.user_id(), id=label_id)
-            .execute()
-        )
-        self.path_ = self.content_["name"]
-        self.name_ = self.path_.split("/")[-1]
+        # self.content_ = (
+        #    self.account_.api_conn_.users()
+        #    .labels()
+        #    .get(userId=self.account_.user_id(), id=label_id)
+        #    .execute()
+        # )
+        self.name_ = name
         self.messages_ = None
-        self.sublabels_ = {}
 
         if not lazy_load:
             self.load_messages()
-
-    @classmethod
-    def get_all_labels(cls, account):
-        """Retrieve a list of all labels under the GMail account"""
-        result = (
-            account.api_conn_.users().labels().list(userId=account.user_id()).execute()
-        )
-        label_list = []
-        for label in result["labels"]:
-            label_list.append(Label(account, label["id"]))
-        return label_list
 
     def load_messages(self):
         """Load all messages *at top level only* for the message"""
@@ -198,21 +194,13 @@ class Label:
         """Return text name for the label"""
         return self.name_
 
+    def short_name(self):
+        """Return the brief Label name, e.g. Foo/Bar/Bat returns Bat"""
+        return self.name_.split("/")[-1]
+
     def messages(self):
         """Return list of messages under the label"""
         return self.messages_
-
-    def path(self):
-        """Return label's fully qualified path in the account label tree"""
-        return self.path_
-
-    def add_label(self, label):
-        """Add a new sublabel to the label"""
-        self.sublabels_[label.name()] = label
-
-    def sublabels(self):
-        """Return the set of sublabels under this label"""
-        return self.sublabels_
 
 
 class Message:
