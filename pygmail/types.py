@@ -16,13 +16,6 @@ from googleapiclient.discovery import build  # type: ignore
 class Account:
     """Encapsulate Google GMail account"""
 
-    class LabelTree:
-        """Represent heirarchical tree of Labels in Account, organized by name path"""
-
-        def __init__(self):
-            self.root_ = None
-            self.children_ = None
-
     # If modifying these scopes, delete the file token.json.
     _SCOPES = ["https://mail.google.com/"]
 
@@ -105,9 +98,30 @@ class Account:
         """Return account's history ID"""
         return self.history_id_
 
-    def get_label_tree(self, root=None):
-        """Load all labels recursively for the account"""
-        # Time consuming (can probably be parallelized
+    def get_label_heirarchy(self):
+        """Load the label heirarchy for the account"""
+        if not self.labels_:
+            self.load_labels()
+
+        # Organize all labels by level
+        levels = []
+        for label in self.labels_:
+            level = len(label.name().split("/"))
+            while len(levels) < level:
+                levels.append({})
+            levels[level - 1][label.short_name()] = label
+
+        # Traverse the labels by level, and add child labels
+        # to their parent label
+        for i in range(1, len(levels)):
+            for _, val in levels[i].items():
+                path = val.name().split("/")
+                parent_name = path[len(path) - 2]
+                parent = levels[i - 1].get(parent_name, None)
+                if parent:
+                    parent.child_labels_.append(val)
+
+        return list(levels[0].values())
 
     def get_all_labels(self):
         """Return flattened list of all the Account's Label"""
@@ -128,14 +142,9 @@ class Label:
     def __init__(self, account, label_id, name, lazy_load=True):
         self.account_ = account
         self.label_id_ = label_id
-        # self.content_ = (
-        #    self.account_.api_conn_.users()
-        #    .labels()
-        #    .get(userId=self.account_.user_id(), id=label_id)
-        #    .execute()
-        # )
         self.name_ = name
         self.messages_ = None
+        self.child_labels_ = []
 
         if not lazy_load:
             self.load_messages()
@@ -201,6 +210,10 @@ class Label:
     def messages(self):
         """Return list of messages under the label"""
         return self.messages_
+
+    def child_labels(self):
+        """Return list of child labels under the label"""
+        return self.child_labels_
 
 
 class Message:
