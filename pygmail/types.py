@@ -136,6 +136,12 @@ class Account:
         return self.labels_by_id_.get(label_id, None)
 
 
+MESSAGE_CONTENT_ID_ONLY = "id_only"
+MESSAGE_CONTENT_MINIMAL = "minimal"
+MESSAGE_CONTENT_METADATA = "metadata"
+MESSAGE_CONTENT_FULL = "full"
+
+
 class Label:
     """GMail email label"""
 
@@ -149,8 +155,11 @@ class Label:
         if not lazy_load:
             self.load_messages()
 
-    def load_messages(self):
+    def load_messages(self, reload=False, contents=MESSAGE_CONTENT_MINIMAL):
         """Load all messages *at top level only* for the message"""
+        if self.messages_ and not reload:
+            return
+
         query = f"label:{self.name_}"
 
         result = (
@@ -164,7 +173,7 @@ class Label:
             for message in result.get("messages", None):
                 if message:
                     self.messages_.append(
-                        Message(self.account_.api_conn_, message.get("id", 0))
+                        Message(self.account_.api_conn_, message.get("id", 0), content_type=contents)
                     )
 
         while "nextPageToken" in result:
@@ -179,7 +188,7 @@ class Label:
                 for message in result.get("messages", None):
                     if message:
                         self.messages_.append(
-                            Message(self.account_.api_conn_, message.get("id", 0))
+                            Message(self.account_.api_conn_, message.get("id", 0), content_type=contents)
                         )
 
     def discard_messages(self):
@@ -219,25 +228,31 @@ class Label:
 class Message:
     """GMail email message"""
 
-    CONTENT_MINIMAL = "minimal"
-    CONTENT_METADATA = "metadata"
-    CONTENT_FULL = "full"
-
-    def __init__(self, api_conn, msg_id, content_type=CONTENT_METADATA):
+    def __init__(self, api_conn, msg_id, content_type=MESSAGE_CONTENT_MINIMAL):
         self.api_conn_ = api_conn
-        self.content_type_ = content_type
         self.message_id_ = msg_id
+        self.content_type_ = MESSAGE_CONTENT_ID_ONLY
         self.content_ = None
-        self.load_message(self.content_type_)
+        self.load_message(content_type)
 
     def load_message(self, content_type):
         """Fetch details about message from GMail server"""
-        self.content_ = (
-            self.api_conn_.users()
-            .messages()
-            .get(id=self.message_id_, userId="me", format=content_type)
-            .execute()
-        )
+        if self.content_type_ != content_type:
+            if content_type == MESSAGE_CONTENT_ID_ONLY:
+                self.clear()
+            else:
+                self.content_ = (
+                    self.api_conn_.users()
+                    .messages()
+                    .get(id=self.message_id_, userId="me", format=content_type)
+                    .execute()
+                )
+            self.content_type_ = content_type
+
+    def clear(self):
+        """Remove content from the Message"""
+        self.content_type_ = MESSAGE_CONTENT_ID_ONLY
+        self.content_ = None
 
     def delete(self):
         """Permanently delete the message"""
@@ -250,6 +265,14 @@ class Message:
             .trash(userId="me", id=self.message_id_)
             .execute()
         )
+
+    def message_id(self):
+        """Show the message ID"""
+        return self.message_id_
+
+    def content_type(self):
+        """Show the content type"""
+        return self.content_type_
 
     def content(self):
         """Show the content, body and metadata, of the message"""

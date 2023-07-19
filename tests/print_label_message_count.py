@@ -1,4 +1,4 @@
-from pygmail.types import Account
+from pygmail.types import MESSAGE_CONTENT_ID_ONLY, Account
 
 SKIP_LABELS = set(("CHAT", "IMPORTANT", "SENT", "TRASH", "UNREAD", "STARRED"))
 
@@ -9,7 +9,7 @@ def print_labels(label):
     if label.name() in SKIP_LABELS:
         return
 
-    label.load_messages()
+    label.load_messages(contents=MESSAGE_CONTENT_ID_ONLY)
     print(f"{label.name()} has {len(label.messages())} in it")
     for child in label.child_labels():
         print_labels(child)
