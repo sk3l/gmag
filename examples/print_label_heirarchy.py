@@ -9,7 +9,7 @@ def print_labels(label):
         print_labels(child)
 
 
-acct = Account("ADD_YOUR_ACCOUNT")
+acct = Account.from_environment()
 labels = acct.get_label_heirarchy()
 
 for lbl in labels:

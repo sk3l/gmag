@@ -15,7 +15,7 @@ def print_labels(label):
         print_labels(child)
 
 
-acct = Account("YOUR_ACCOUNT@gmail.com")
+acct = Account.from_environment()
 labels = acct.get_label_heirarchy()
 
 for lbl in labels:
