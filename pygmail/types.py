@@ -19,6 +19,15 @@ class Account:
     # If modifying these scopes, delete the file token.json.
     _SCOPES = ["https://mail.google.com/"]
 
+    @classmethod
+    def from_environment(cls, load_labels=False, creds_path=os.path.curdir):
+        """Read account name from environment variable"""
+        account_name = os.environ.get("GMAIL_ACCOUNT", None)
+        account = None
+        if account_name:
+            account = Account(account_name, load_labels, creds_path)
+        return account
+
     def __init__(self, user_id, load_labels=False, creds_path=os.path.curdir):
         self.api_conn_ = None
         self.user_id_ = user_id
@@ -145,6 +154,17 @@ MESSAGE_CONTENT_FULL = "full"
 class Label:
     """GMail email label"""
 
+    @classmethod
+    def delete(cls, account, label_id):
+        result = (
+            account.api_conn_.users()
+            .labels()
+            .delete(userId="me", id=label_id)
+            .execute()
+        )
+        return result
+
+
     def __init__(self, account, label_id, name, lazy_load=True):
         self.account_ = account
         self.label_id_ = label_id
@@ -194,14 +214,7 @@ class Label:
     def discard_messages(self):
         """Send all messages *at top level only* to the trash folder"""
         for message in self.messages():
-            headers = message.content()["payload"]["headers"]
-            subject = next(
-                header["value"] for header in headers if header["name"] == "Subject"
-            )
-            from_addr = next(
-                header["value"] for header in headers if header["name"] == "From"
-            )
-            print(f"Discarding message , subject={subject}, from={from_addr}")
+            print(f"Discarding message , ID={message.message_id()}")
             message.discard()
 
     def label_id(self):
